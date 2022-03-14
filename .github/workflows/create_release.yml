@@ -39,6 +39,9 @@ jobs:
           git push origin master
           git tag ${{ github.event.inputs.version }}
           git push origin tag ${{ github.event.inputs.version }}
+          
+      - name: Compile typescript
+        run: ./scripts/compile.sh
         
       - name: Create ankiaddon file
         run: aab build -d ankiweb
