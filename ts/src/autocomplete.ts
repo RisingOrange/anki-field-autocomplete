@@ -1,14 +1,18 @@
 import * as NoteEditor from "anki/NoteEditor";
+import autoComplete from "@tarekraafat/autocomplete.js";
+
+import type NoteEditorAPI from "@anki/editor/NoteEditor.svelte";
+import type { EditorFieldAPI } from "@anki/editor/EditorField.svelte";
 
 export class Autocomplete {
     fields: NoteEditorAPI
     acByField = new Map();
     optionsByField = new Map();
-    enabledFields = [];
-    icons = [];
+    enabledFields: number[] = [];
+    icons: HTMLElement[] = [];
     looseSearch = false;
 
-    constructor(fields) {
+    constructor(fields: EditorFieldAPI[]) {
         this.fields = fields;
         Object.assign(globalThis, {
             fieldAutocomplete: this,
@@ -16,23 +20,29 @@ export class Autocomplete {
     }
 
     setup(options) {
-        this.enabledFields = options["ords"];
-        // this.looseSearch = options['looseSearch']
+        globalThis.console.log("setup", options)
 
-        // this.setupAcs(this.enabledFields)
-        this.setupIcons(this.enabledFields);
+        this.enabledFields = options["ords"];
+        this.looseSearch = options['looseSearch']
+
+        setTimeout(() => {
+            this.setupAcs(this.enabledFields)
+            this.setupIcons(this.enabledFields);
+        })
     }
 
     update(data) {
+        globalThis.console.log("update", data);
+
         const { ord, options } = data;
-        this.optionsByField?.set(ord, options);
+        this.optionsByField.set(ord, options);
         const ac = this.acByField.get(ord);
         if (!ac.list.hasAttribute("hidden")) {
             ac.start();
         }
     }
 
-    setupAcs(enabledFields) {
+    setupAcs(enabledFields: number[]) {
         if (this.acByField != null) {
             for (const ord of this.acByField.keys()) {
                 this.removeAc(ord);
@@ -42,94 +52,99 @@ export class Autocomplete {
         this.acByField = new Map();
         this.optionsByField = new Map();
 
-        forEditorField([], (field) => {
-            const ord = field.editingArea.ord;
+        for (const [ord, field] of this.fields.entries()) {
             if (!enabledFields.includes(ord)) return;
-
-            // this.addAc(ord)
-        });
+            field.element.then((fieldElement: HTMLElement) => {
+                this.addAc(ord, fieldElement)
+            })
+        }
     }
 
-    // addAc(ord) {
-    //     const field = globalThis.getEditorField(ord)
-    //     const editable = field.editingArea.editable
+    addAc(ord: number, field: HTMLElement) {
+        const editingArea = field.getElementsByClassName("editing-area")[0];
+        const shadowRoot = editingArea.getElementsByClassName("rich-text-editable")[0].shadowRoot;
+        const editable = shadowRoot?.querySelector("anki-editable");
 
-    //     const listWrapper = field.editingArea.shadowRoot.querySelector('#list_wrapper')
-    //     if (!listWrapper) {
-    //         listWrapper = document.createElement('span')
-    //         listWrapper.id = 'list_wrapper'
-    //         field.editingArea.shadowRoot.appendChild(listWrapper)
+        let resultListWrapper = editingArea.querySelector('result-list-wrapper')
+        if (!resultListWrapper) {
+            resultListWrapper = globalThis.document.createElement('span')
+            resultListWrapper.id = 'result-list-wrapper'
+            editingArea.appendChild(resultListWrapper)
 
-    //         var style = document.createElement("style")
-    //         style.innerHTML = css
-    //         field.editingArea.shadowRoot.insertBefore(style, editable)
-    //     }
+            const style = document.createElement("style")
+            style.innerHTML = css
+            editingArea.insertBefore(style, resultListWrapper)
+        }
 
-    //     var ac = new Autocomplete({
-    //         selector: () => { return editable },
-    //         data: {
-    //             src: () => { return this.optionsByField.get(ord) },
-    //             filter: (options) => {
-    //                 var result = options.filter(x => x.value.replace(' ', '') != '')
-    //                 return result
-    //             },
-    //         },
-    //         searchEngine: "loose" ? this.looseSearch : "strict",
-    //         resultItem: {
-    //             highlight: {
-    //                 render: true
-    //             }
-    //         },
-    //         wrapper: false,
-    //         events: {
-    //             input: {
-    //                 init: (event) => {
-    //                     globalThis.bridgeCommand(`this:{ "ord": ${ord}, "text" : "" }`)
-    //                 },
-    //                 focus: (event) => {
-    //                     ac.start();
-    //                 },
-    //                 selection: (event) => {
-    //                     const selection = event.detail.selection.value;
-    //                     editable.fieldHTML = selection;
-    //                 },
-    //             },
-    //         },
-    //         threshold: 0,
-    //         resultsList: {
-    //             destination: () => {
-    //                 return listWrapper
-    //             },
-    //             tag: "ul",
-    //             class: "this_results",
-    //             tabSelect: true,
-    //             noResults: true,
-    //             element: (list, data) => {
-    //                 if (!data.results.length) {
-    //                     const message = document.createElement("div");
-    //                     message.setAttribute("class", "no_result");
-    //                     message.innerHTML = `<span>no results</span>`;
-    //                     list.appendChild(message);
-    //                 }
-    //             },
-    //             maxResults: 10,
-    //         },
-    //         query: (input) => {
-    //             return input.replace("<br>", "").replace('&nbsp;', ' ');
-    //         },
-    //     })
+        const ac = new autoComplete({
+            selector: () => { return editable },
+            data: {
+                src: () => {
+                    return new Promise((resolve, _) => {
+                        resolve(this.optionsByField.get(ord) || []);
+                    });
+                },
+                filter: (options) => {
+                    const result = options.filter(x => x.value.replace(' ', '') != '')
+                    return result
+                },
+            },
+            wrapper: false,
+            resultsList: {
+                destination: () => {
+                    return resultListWrapper
+                },
+                tag: "ul",
+                class: "result-list",
+                tabSelect: true,
+                noResults: true,
+                element: (list, data) => {
+                    if (!data.results.length) {
+                        const message = document.createElement("div");
+                        message.setAttribute("class", "no-result");
+                        message.innerHTML = `<span>no results</span>`;
+                        list.appendChild(message);
+                    }
+                },
+                maxResults: 10,
+            },
+            searchEngine: this.looseSearch ? "loose" : "strict",
+            resultItem: {
+                highlight: {
+                    render: true
+                }
+            },
+            events: {
+                input: {
+                    init: (_) => {
+                        globalThis.bridgeCommand(`fieldAutocomplete:{ "ord": ${ord}, "text" : "" }`)
+                    },
+                    focus: (_) => {
+                        ac.start();
+                    },
+                    selection: (event: Event) => {
+                        const selection = event.detail.selection.value;
+                        editable.textContent = selection;
+                    },
+                },
+            },
+            threshold: 0,
+            query: (input) => {
+                return input.replace("<br>", "").replace('&nbsp;', ' ');
+            },
+        })
 
-    //     ac.input.addEventListener('input', () => {
-    //         if (ac.disabled) return
-    //         globalThis.bridgeCommand(`this:{ "ord": ${ord}, "text" : ${JSON.stringify(editable.fieldHTML)} }`)
-    //     })
+        ac.input.addEventListener('input', () => {
+            if (ac.disabled) return
+            globalThis.bridgeCommand(`fieldAutocomplete:{ "ord": ${ord}, "text" : ${JSON.stringify(editable.textContent)} }`)
+        })
 
-    //     this.acByField.set(ord, ac)
-    //     this.optionsByField.set(ord, [])
-    // }
+        this.acByField.set(ord, ac)
+        this.optionsByField.set(ord, [])
+    }
 
-    removeAc(ord) {
-        var ac = this.acByField.get(ord);
+    removeAc(ord: number) {
+        const ac = this.acByField.get(ord);
         ac.unInit();
         ac.list.remove();
         ac.disabled = true;
@@ -138,7 +153,7 @@ export class Autocomplete {
         this.optionsByField.delete(ord);
     }
 
-    toggleAc(ord) {
+    toggleAc(ord: number, field: HTMLElement) {
         if (this.enabledFields.includes(ord)) {
             this.enabledFields.splice(this.enabledFields.indexOf(ord), 1);
             this.icons[ord].classList.remove("enabled");
@@ -149,14 +164,14 @@ export class Autocomplete {
         } else {
             this.enabledFields.push(ord);
             this.icons[ord].classList.add("enabled");
-            this.addAc(ord);
+            this.addAc(ord, field);
             globalThis.bridgeCommand(
                 `update_ac_settings:{"ord" : ${ord}, "val" : true}`,
             );
         }
     }
 
-    setupIcons(enabledFields) {
+    setupIcons(enabledFields: number[]) {
         for (const icon of this.icons) {
             icon.remove();
         }
@@ -168,24 +183,24 @@ export class Autocomplete {
             field.element.then((fieldElement) => {
                 globalThis.console.log(fieldElement);
 
-                const icon = this.addIconToField(fieldElement)
+                const icon = this.addIconToField(ord, fieldElement)
                 this.icons.push(icon)
 
-                // if (enabledFields.includes(ord)) {
-                //     icon.classList.add('enabled')
-                // } else {
-                //     icon.classList.add('disabled')
-                // }
+                if (enabledFields.includes(ord)) {
+                    icon.classList.add('enabled')
+                } else {
+                    icon.classList.add('disabled')
+                }
             });
 
         }
     }
 
-    addIconToField(field: HTMLElement): HTMLElement {
+    addIconToField(ord: number, field: HTMLElement): HTMLElement {
         const icon = globalThis.document.createElement('span')
         icon.classList.add('ac-icon')
         icon.addEventListener('click', () => {
-            this.toggleAc(ord)
+            this.toggleAc(ord, field)
         })
 
         const fieldState = field.getElementsByClassName("field-state")[0]
@@ -200,7 +215,7 @@ export class Autocomplete {
 
 
 const css = `
-.no_result {
+.no-result {
     padding: 10px 20px;
     list-style: none;
     text-align: left;
@@ -216,12 +231,12 @@ const css = `
     transition: all .2s ease
 }
 
-#list_wrapper {
+#result-list-wrapper {
     position: relative;
     display: block;
 }
 
-.this_results {
+.result-list {
     position: absolute;
     max-height: 226px;
     overflow-y: scroll;
@@ -237,7 +252,7 @@ const css = `
     outline: 0
 }
 
-.this_results>li {
+.result-list>li {
     padding: 10px 20px;
     list-style: none;
     text-align: left;
@@ -252,28 +267,28 @@ const css = `
     transition: all .2s ease
 }
 
-.this_results>li::selection {
+.result-list>li::selection {
     color: rgba(#fff, 0);
     background-color: rgba(#fff, 0)
 }
 
-.this_results>li:hover {
+.result-list>li:hover {
     cursor: pointer;
     background-color: rgba(49, 49, 49, 0.2)
 }
 
-.this_results>li mark {
+.result-list>li mark {
     background-color: transparent;
     color: #ff7a7a;
     font-weight: 700
 }
 
-.this_results>li mark::selection {
+.result-list>li mark::selection {
     color: rgba(#fff, 0);
     background-color: rgba(#fff, 0)
 }
 
-.this_results>li[aria-selected=true] {
+.result-list>li[aria-selected=true] {
     background-color: rgba(123, 123, 123, .4)
 }
 
