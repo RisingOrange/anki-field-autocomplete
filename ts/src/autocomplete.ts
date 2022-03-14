@@ -1,11 +1,9 @@
-import * as NoteEditor from "anki/NoteEditor";
 import autoComplete from "@tarekraafat/autocomplete.js";
 
-import type NoteEditorAPI from "@anki/editor/NoteEditor.svelte";
 import type { EditorFieldAPI } from "@anki/editor/EditorField.svelte";
 
 export class Autocomplete {
-    fields: NoteEditorAPI
+    fields: EditorFieldAPI[]
     acByField = new Map();
     optionsByField = new Map();
     enabledFields: number[] = [];
@@ -20,20 +18,16 @@ export class Autocomplete {
     }
 
     setup(options) {
-        globalThis.console.log("setup", options)
-
         this.enabledFields = options["ords"];
         this.looseSearch = options['looseSearch']
 
         setTimeout(() => {
-            this.setupAcs(this.enabledFields)
-            this.setupIcons(this.enabledFields);
+            this._setupAcs(this.enabledFields)
+            this._setupIcons(this.enabledFields);
         })
     }
 
     update(data) {
-        globalThis.console.log("update", data);
-
         const { ord, options } = data;
         this.optionsByField.set(ord, options);
         const ac = this.acByField.get(ord);
@@ -42,10 +36,29 @@ export class Autocomplete {
         }
     }
 
-    setupAcs(enabledFields: number[]) {
+    toggleAc(ord: number, field: HTMLElement) {
+        if (this.enabledFields.includes(ord)) {
+            this.enabledFields.splice(this.enabledFields.indexOf(ord), 1);
+            this.icons[ord].classList.remove("enabled");
+            this._removeAc(ord);
+            globalThis.bridgeCommand(
+                `update_ac_settings:{"ord" : ${ord}, "val" : false}`,
+            );
+        } else {
+            this.enabledFields.push(ord);
+            this.icons[ord].classList.add("enabled");
+            this._addAc(ord, field);
+            globalThis.bridgeCommand(
+                `update_ac_settings:{"ord" : ${ord}, "val" : true}`,
+            );
+        }
+    }
+
+
+    _setupAcs(enabledFields: number[]) {
         if (this.acByField != null) {
             for (const ord of this.acByField.keys()) {
-                this.removeAc(ord);
+                this._removeAc(ord);
             }
         }
 
@@ -55,12 +68,12 @@ export class Autocomplete {
         for (const [ord, field] of this.fields.entries()) {
             if (!enabledFields.includes(ord)) return;
             field.element.then((fieldElement: HTMLElement) => {
-                this.addAc(ord, fieldElement)
+                this._addAc(ord, fieldElement)
             })
         }
     }
 
-    addAc(ord: number, field: HTMLElement) {
+    _addAc(ord: number, field: HTMLElement) {
         const editingArea = field.getElementsByClassName("editing-area")[0];
         const shadowRoot = editingArea.getElementsByClassName("rich-text-editable")[0].shadowRoot;
         const editable = shadowRoot?.querySelector("anki-editable");
@@ -143,7 +156,7 @@ export class Autocomplete {
         this.optionsByField.set(ord, [])
     }
 
-    removeAc(ord: number) {
+    _removeAc(ord: number) {
         const ac = this.acByField.get(ord);
         ac.unInit();
         ac.list.remove();
@@ -153,37 +166,15 @@ export class Autocomplete {
         this.optionsByField.delete(ord);
     }
 
-    toggleAc(ord: number, field: HTMLElement) {
-        if (this.enabledFields.includes(ord)) {
-            this.enabledFields.splice(this.enabledFields.indexOf(ord), 1);
-            this.icons[ord].classList.remove("enabled");
-            this.removeAc(ord);
-            globalThis.bridgeCommand(
-                `update_ac_settings:{"ord" : ${ord}, "val" : false}`,
-            );
-        } else {
-            this.enabledFields.push(ord);
-            this.icons[ord].classList.add("enabled");
-            this.addAc(ord, field);
-            globalThis.bridgeCommand(
-                `update_ac_settings:{"ord" : ${ord}, "val" : true}`,
-            );
-        }
-    }
-
-    setupIcons(enabledFields: number[]) {
+    _setupIcons(enabledFields: number[]) {
         for (const icon of this.icons) {
             icon.remove();
         }
         this.icons = [];
 
-        globalThis.console.log("setup icons");
-
         for (const [ord, field] of this.fields.entries()) {
             field.element.then((fieldElement) => {
-                globalThis.console.log(fieldElement);
-
-                const icon = this.addIconToField(ord, fieldElement)
+                const icon = this._addIconToField(ord, fieldElement)
                 this.icons.push(icon)
 
                 if (enabledFields.includes(ord)) {
@@ -196,7 +187,7 @@ export class Autocomplete {
         }
     }
 
-    addIconToField(ord: number, field: HTMLElement): HTMLElement {
+    _addIconToField(ord: number, field: HTMLElement): HTMLElement {
         const icon = globalThis.document.createElement('span')
         icon.classList.add('ac-icon')
         icon.addEventListener('click', () => {
@@ -206,7 +197,7 @@ export class Autocomplete {
         const fieldState = field.getElementsByClassName("field-state")[0]
         fieldState.insertBefore(
             icon,
-            fieldState.children[0]
+            fieldState.querySelector("span")
         );
 
         return icon;
